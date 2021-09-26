@@ -1,6 +1,6 @@
 # Step 1 is to setup a dataset of faces in the PC.
 # Step 2 is to train the system to determine the faces.
-#Step 3 is to detect the faces in real time using python.
+# Step 3 is to detect the faces in real time using python.
 
 
 # Step 1 - 
