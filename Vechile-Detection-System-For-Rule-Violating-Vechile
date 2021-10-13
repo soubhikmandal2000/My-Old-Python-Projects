@@ -1,0 +1,431 @@
+# Step 1 is to setup a dataset for traffic rule violating echicle Detection.
+# Step 2 is to dect thr speed  of traffic rule volating vechiles.
+# Step 3 is to scan the number plate of traffic rule volating vechiles in real time using python library tensorflow & OpenALPR.
+
+
+Step 1 -
+
+
+import cv2
+import numpy as np
+import time
+import vehicles
+cap=cv2.VideoCapture("video.mp4")
+fgbg=cv2.createBackgroundSubtractorMOG2(detectShadows=False,history=200,varThreshold = 90)
+kernalOp = np.ones((3,3),np.uint8)
+kernalOp2 = np.ones((5,5),np.uint8)
+kernalCl = np.ones((11,11),np.uint8)
+font = cv2.FONT_HERSHEY_SIMPLEX
+cars = []
+max_p_age = 5
+pid = 1
+cnt_up=0
+cnt_down=0
+print("Car counting and classification")
+line_up=400
+line_down=250
+up_limit=230
+down_limit=int(4.5*(500/5))
+while(cap.isOpened()):
+    ret,frame=cap.read()
+    frame=cv2.resize(frame,(900,500))
+    for i in cars:
+        i.age_one()
+    fgmask=fgbg.apply(frame)
+    if ret==True:
+        ret,imBin=cv2.threshold(fgmask,200,255,cv2.THRESH_BINARY)
+        mask = cv2.morphologyEx(imBin, cv2.MORPH_OPEN, kernalOp)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernalCl)
+        (countours0,hierarchy)=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+        for cnt in countours0:
+            area=cv2.contourArea(cnt)
+            print(area)
+            if area>300:
+                m=cv2.moments(cnt)
+                cx=int(m['m10']/m['m00'])
+                cy=int(m['m01']/m['m00'])
+                x,y,w,h=cv2.boundingRect(cnt)
+                new=True
+                if cy in range(up_limit,down_limit):
+                    for i in cars:
+                        if abs(x - i.getX()) <= w and abs(y - i.getY()) <= h:
+                            new = False
+                            i.updateCoords(cx, cy)
+                            if i.going_UP(line_down,line_up)==True:
+                                cnt_up+=1
+                            elif i.going_DOWN(line_down,line_up)==True:
+                                cnt_down+=1
+                            break
+                        if i.getState()=='1':
+                            if i.getDir()=='down'and i.getY()>down_limit:
+                                i.setDone()
+                            elif i.getDir()=='up'and i.getY()<up_limit:
+                                i.setDone()
+                        if i.timedOut():
+                            index=cars.index(i)
+                            cars.pop(index)
+                            del i
+                    if new==True:
+                        p=vehicles.Car(pid,cx,cy,max_p_age)
+                        cars.append(p)
+                        pid+1
+                cv2.circle(frame, (cx, cy), 2, (0, 0, 255), -1)
+                img=cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+        for i in cars:
+            cv2.putText(frame, str(i.getId()), (i.getX(), i.getY()), font, 0.3, (255,255,0), 1, cv2.LINE_AA)
+            if line_down+20<= i.getY() <= line_up-20:
+               a = (h + (.74*w)- 100)
+
+               if a >= 0:
+                     cv2.putText(frame, "Truck", (i.getX(), i.getY()), font, 1, (0,0,255), 2, cv2.LINE_AA)
+               else:
+                     cv2.putText(frame, "car", (i.getX(), i.getY()), font, 1, (0,0,255), 2, cv2.LINE_AA)
+        str_up='UP: '+str(cnt_up)
+        str_down='DOWN: '+str(cnt_down)
+        frame=cv2.line(frame,(0,line_up),(900,line_up),(0,0,255),3,8)
+        frame=cv2.line(frame,(0,up_limit),(900,up_limit),(0,0,0),1,8)
+        frame=cv2.line(frame,(0,down_limit),(900,down_limit),(255,255,0),1,8)
+        frame = cv2.line(frame, (0, line_down), (900, line_down), (255, 0,0), 3, 8)
+        cv2.putText(frame, str_up, (10, 40), font, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, str_down, (10, 90), font, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+        cv2.imshow('Frame',frame)
+        if cv2.waitKey(1)&0xff==ord('q'):
+        break
+    else:
+        break
+cap.release()
+cv2.destroyAllWindows()
+from random import randint
+import time
+class Car:
+    tracks=[]
+    def __init__(self,i,xi,yi,max_age):
+        self.i=i
+        self.x=xi
+        self.y=yi
+        self.tracks=[]
+        self.done=False
+        self.state='0'
+        self.age=0
+        self.max_age=max_age
+        self.dir=None
+    def getTracks(self):
+        return self.tracks
+    def getId(self): #For the ID
+        return self.i
+    def getState(self):
+        return self.state
+    def getDir(self):
+        return self.dir
+    def getX(self):  #for x coordinate
+        return self.x
+    def getY(self):  #for y coordinate
+        return self.y
+    def updateCoords(self, xn, yn):
+        self.age = 0
+        self.tracks.append([self.x, self.y])
+        self.x = xn
+        self.y = yn
+    def setDone(self):
+        self.done = True
+    def timedOut(self):
+        return self.done
+    def going_UP(self, mid_start, mid_end):
+        if len(self.tracks)>=2:
+            if self.state=='0':
+                if self.tracks[-1][1]<mid_end and self.tracks[-2][1]>=mid_end:
+                    state='1'
+                    self.dir='up'
+                    return True
+                else:
+                    return False
+            else:
+                return False
+        else:
+            return False
+    def going_DOWN(self,mid_start,mid_end):
+        if len(self.tracks)>=2:
+            if self.state=='0':
+                if self.tracks[-1][1]>mid_start and self.tracks[-2][1]<=mid_start:
+                    start='1'
+                    self.dir='down'
+                    return True
+                else:
+                    return False
+            else:
+                return False
+        else:
+            return False
+    def age_one(self):
+        self.age+=1
+        if self.age>self.max_age:
+            self.done=True
+        return  True
+#Class2
+class MultiCar:
+    def __init__(self,cars,xi,yi):
+        self.cars=cars
+        self.x=xi
+        self.y=yi
+        self.tracks=[]
+        self.done=False 
+        
+        
+Step 2 -
+
+
+import cv2
+import dlib
+import time
+import threading
+import math
+carCascade = cv2.CascadeClassifier('myhaar.xml')
+video = cv2.VideoCapture('cars.mp4')
+WIDTH = 1280
+HEIGHT = 720
+def estimateSpeed(location1, location2):
+	d_pixels = math.sqrt(math.pow(location2[0] - location1[0], 2) + math.pow(location2[1] - location1[1], 2))
+	# ppm = location2[2] / carWidht
+	ppm = 8.8
+	d_meters = d_pixels / ppm
+	#print("d_pixels=" + str(d_pixels), "d_meters=" + str(d_meters))
+	fps = 18
+	speed = d_meters * fps * 3.6
+	return speed
+def trackMultipleObjects():
+	rectangleColor = (0, 255, 0)
+	frameCounter = 0
+	currentCarID = 0
+	fps = 0
+	carTracker = {}
+	carNumbers = {}
+	carLocation1 = {}
+	carLocation2 = {}
+	speed = [None] * 1000
+	# Write output to video file
+	out = cv2.VideoWriter('outpy.avi',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (WIDTH,HEIGHT))
+	while True:
+		start_time = time.time()
+		rc, image = video.read()
+		if type(image) == type(None):
+			break
+		image = cv2.resize(image, (WIDTH, HEIGHT))
+		resultImage = image.copy()
+		frameCounter = frameCounter + 1
+		carIDtoDelete = []
+		for carID in carTracker.keys():
+			trackingQuality = carTracker[carID].update(image)		
+			if trackingQuality < 7:
+				carIDtoDelete.append(carID)	
+		for carID in carIDtoDelete:
+			print ('Removing carID ' + str(carID) + ' from list of trackers.')
+			print ('Removing carID ' + str(carID) + ' previous location.')
+			print ('Removing carID ' + str(carID) + ' current location.')
+			carTracker.pop(carID, None)
+			carLocation1.pop(carID, None)
+			carLocation2.pop(carID, None)		
+		if not (frameCounter % 10):
+			gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+			cars = carCascade.detectMultiScale(gray, 1.1, 13, 18, (24, 24))			
+			for (_x, _y, _w, _h) in cars:
+				x = int(_x)
+				y = int(_y)
+				w = int(_w)
+				h = int(_h)		
+				x_bar = x + 0.5 * w
+				y_bar = y + 0.5 * h				
+				matchCarID = None			
+				for carID in carTracker.keys():
+					trackedPosition = carTracker[carID].get_position()					
+					t_x = int(trackedPosition.left())
+					t_y = int(trackedPosition.top())
+					t_w = int(trackedPosition.width())
+					t_h = int(trackedPosition.height())					
+					t_x_bar = t_x + 0.5 * t_w
+					t_y_bar = t_y + 0.5 * t_h				
+					if ((t_x <= x_bar <= (t_x + t_w)) and (t_y <= y_bar <= (t_y + t_h)) and (x <= t_x_bar <= (x + w)) and (y <= t_y_bar <= (y + h))):
+						matchCarID = carID
+							if matchCarID is None:
+					print ('Creating new tracker ' + str(currentCarID))					
+					tracker = dlib.correlation_tracker()
+					tracker.start_track(image, dlib.rectangle(x, y, x + w, y + h))					
+					carTracker[currentCarID] = tracker
+					carLocation1[currentCarID] = [x, y, w, h]
+					currentCarID = currentCarID + 1		
+		#cv2.line(resultImage,(0,480),(1280,480),(255,0,0),5)
+		for carID in carTracker.keys():
+			trackedPosition = carTracker[carID].get_position()
+			t_x = int(trackedPosition.left())
+			t_y = int(trackedPosition.top())
+			t_w = int(trackedPosition.width())
+			t_h = int(trackedPosition.height())		
+			cv2.rectangle(resultImage, (t_x, t_y), (t_x + t_w, t_y + t_h), rectangleColor, 4)			
+			# speed estimation
+			carLocation2[carID] = [t_x, t_y, t_w, t_h]		
+		end_time = time.time()
+		if not (end_time == start_time):
+			fps = 1.0/(end_time - start_time)
+		#cv2.putText(resultImage, 'FPS: ' + str(int(fps)), (620, 30),cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
+		for i in carLocation1.keys():	
+			if frameCounter % 1 == 0:
+				[x1, y1, w1, h1] = carLocation1[i]
+				[x2, y2, w2, h2] = carLocation2[i]	
+				# print 'previous location: ' + str(carLocation1[i]) + ', current location: ' + str(carLocation2[i])
+				carLocation1[i] = [x2, y2, w2, h2]		
+				# print 'new previous location: ' + str(carLocation1[i])
+				if [x1, y1, w1, h1] != [x2, y2, w2, h2]:
+					if (speed[i] == None or speed[i] == 0) and y1 >= 275 and y1 <= 285:
+						speed[i] = estimateSpeed([x1, y1, w1, h1], [x2, y2, w2, h2])
+					#if y1 > 275 and y1 < 285:
+					if speed[i] != None and y1 >= 180:
+						cv2.putText(resultImage, str(int(speed[i])) + " km/hr", (int(x1 + w1/2), int(y1-5)),cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)					
+					#print ('CarID ' + str(i) + ': speed is ' + str("%.2f" % round(speed[i], 0)) + ' km/h.\n')
+					#else:
+					#	cv2.putText(resultImage, "Far Object", (int(x1 + w1/2), int(y1)),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+						#print ('CarID ' + str(i) + ' Location1: ' + str(carLocation1[i]) + ' Location2: ' + str(carLocation2[i]) + ' speed is ' + str("%.2f" % round(speed[i], 0)) + ' km/h.\n')
+		cv2.imshow('result', resultImage)
+		# Write the frame into the file 'output.avi'
+		#out.write(resultImage)
+		if cv2.waitKey(33) == 27:
+			break	
+	cv2.destroyAllWindows()
+if __name__ == '__main__':
+	trackMultipleObjects()
+
+
+Step 3 - 
+
+import cv2
+import pytesseract
+import numpy as np
+from matplotlib import pyplot as plt
+import os
+files = [
+    {'name': 'car_1.jpg', 'color': 'white'},
+    {'name': 'car_2.jpg', 'color': 'special', 'option':{
+        'type': 'color',
+        'lower_white': np.array([0,0,200], dtype=np.uint8),
+        'upper_white': np.array([255,30,255], dtype=np.uint8),
+        'no_bitwise': False
+    }},
+    {'name': 'car_3.jpg', 'color': 'yellow'},
+    {'name': 'car_4.jpg', 'color': 'white_bg'},
+    {'name': 'car_5.jpg', 'color': 'white'},
+    {'name': 'car_6.jpg', 'color': 'white'},
+    {'name': 'car_7.jpg', 'color': 'white'},
+    {'name': 'car_8.jpg', 'color': 'yellow'},
+    {'name': 'car_9.jpg', 'color': 'white'},
+    {'name': 'car_10.jpg', 'color': 'white'},
+    {'name': 'car_11.jpg', 'color': 'white'},
+    {'name': 'car_12.jpg', 'color': 'yellow'},
+    {'name': 'car_13.jpg', 'color': 'yellow'},
+    {'name': 'car_14.jpg', 'color': 'yellow'}
+]
+def img_process(ori_img, color, option):
+    image = cv2.cvtColor(ori_img, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(image, thresh=200, maxval=255, type=cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    if option is not None and option['no_bitwise']:
+        img_mask = image
+    else:
+        img_mask = cv2.bitwise_and(image, mask)
+    if color in ('white', 'yellow'):
+        hsv = cv2.cvtColor(ori_img, cv2.COLOR_BGR2HSV)
+        h, s, v1 = cv2.split(hsv)
+        if color == 'white':
+            lower_white = np.array([0,0,150], dtype=np.uint8)
+            upper_white = np.array([255,40,255], dtype=np.uint8)
+        elif color == 'yellow':
+            lower_white = np.array([20, 100, 100], dtype=np.uint8)
+            upper_white = np.array([30, 255, 255], dtype=np.uint8)
+        res_mask = cv2.inRange(hsv, lower_white, upper_white)
+        res_img = cv2.bitwise_and(v1, image, mask=res_mask)
+    else:
+        if color == 'special' and option is not None and option['type'] == 'color':
+            print(":::::Special - color")
+            hsv = cv2.cvtColor(ori_img, cv2.COLOR_BGR2HSV)
+            h, s, v1 = cv2.split(hsv)
+            upper_white = option['upper_white']
+            lower_white = option['lower_white']
+            res_mask = cv2.inRange(hsv, lower_white, upper_white)
+            res_img = cv2.bitwise_and(v1, image, mask=res_mask)
+        else:
+            res_img = img_mask
+    return res_img
+def contour(res_img, result, color):
+    # Contours
+    contours, _ = cv2.findContours(
+            res_img,
+            cv2.RETR_TREE,
+            cv2.CHAIN_APPROX_SIMPLE
+        )
+    contours = sorted(contours, key = cv2.contourArea, reverse = True)[:5]
+    NumberPlateCnt = None
+    found = False
+    lt, rb = [10000, 10000], [0, 0]
+    if color == 'white_bg':
+        for c in contours:
+             peri = cv2.arcLength(c, True)
+             approx = cv2.approxPolyDP(c, 0.06 * peri, True)
+             if len(approx) == 4:
+                 found = True
+                 NumberPlateCnt = approx
+                 break
+        if found:
+            cv2.drawContours(result, [NumberPlateCnt], -1, (255, 0, 255), 2)
+            for point in NumberPlateCnt:
+                cur_cx, cur_cy = point[0][0], point[0][1]
+                if cur_cx < lt[0]: lt[0] = cur_cx
+                if cur_cx > rb[0]: rb[0] = cur_cx
+                if cur_cy < lt[1]: lt[1] = cur_cy
+                if cur_cy > rb[1]: rb[1] = cur_cy
+            cv2.circle(result, (lt[0], lt[1]), 2, (150, 200, 255), 2)
+            cv2.circle(result, (rb[0], rb[1]), 2, (150, 200, 255), 2)
+            crop = res_img[lt[1]:rb[1], lt[0]:rb[0]]
+        else:
+            crop = res_img.copy()
+    elif len(contours) > 0:
+        # Convex Hull
+        hull = cv2.convexHull(contours[0])
+        approx2 = cv2.approxPolyDP(hull,0.01*cv2.arcLength(hull,True),True)
+        cv2.drawContours(result, [approx2], -1, (255, 0, 255), 2, lineType=8)
+        for point in approx2:
+            cur_cx, cur_cy = point[0][0], point[0][1]
+            if cur_cx < lt[0]: lt[0] = cur_cx
+            if cur_cx > rb[0]: rb[0] = cur_cx
+            if cur_cy < lt[1]: lt[1] = cur_cy
+            if cur_cy > rb[1]: rb[1] = cur_cy
+        cv2.circle(result, (lt[0], lt[1]), 2, (150, 200, 255), 2)
+        cv2.circle(result, (rb[0], rb[1]), 2, (150, 200, 255), 2)
+        crop = res_img[lt[1]:rb[1], lt[0]:rb[0]]
+    else:
+        crop = res_img.copy()
+    return crop
+def show_plt(crop_img, img_name, directory, flag):
+    plt.subplot(235),plt.imshow(crop_img, cmap = 'gray')
+    plt.title('Number Plate Cropped'), plt.xticks([]), plt.yticks([])
+    plt.suptitle(img_name)
+    if flag:
+        plt.show()
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    cv2.imwrite("{}/{}".format(directory, img_name), crop_img)
+    return pytesseract.image_to_string(crop_img, config='--psm 11')
+def main(flag):
+    source_directory = "input"
+    license_number = {}
+    for file in files:
+        print("License Plates - {}".format(file['name']))
+        ori_img = cv2.imread("{}/{}".format(source_directory, file['name']))
+        option = None
+        if file['color'] == 'special':
+            option = file['option']
+        img_name = file['name']
+        result = ori_img
+        res_img = img_process(ori_img.copy(), file['color'], option)       
+        crop_img = contour(res_img, result, file['color'])        
+        number_text = show_plt(crop_img, img_name, "output", flag)
+        license_number[img_name] = number_text
+    print(license_number)
+if __name__ == '__main__':
+    flag = True
+    main(flag)
