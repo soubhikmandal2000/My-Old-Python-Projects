@@ -1,1 +1,1 @@
-# Python-Code-of-my-past-projects
+A collection of my Python projects
